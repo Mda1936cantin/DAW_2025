@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB; // Opcional, pero bueno para transacciones/debugging
+use Illuminate\Support\Facades\Http;
 
 // ¡Asegúrate de que esta línea esté presente y correcta!
 use App\Http\Requests\StoreClientRequest; // <-- Debería ser 'App\Http\Requests'
@@ -90,9 +91,50 @@ class ClientController extends Controller
 // --- Método para la Fase 3: Consumo de Servicio Externo (Ventas) ---
     public function showVentas(Client $client)
     {
-        // Este método se desarrollará en la Fase 3 para consumir el endpoint externo protegido con JWT[cite: 45, 46].
-        // Por ahora, lo dejamos vacío.
-        return view('clients.ventas', compact('client'));
+        try {
+            $apiConfig = config('api.ventas');
+            $baseUrl = rtrim($apiConfig['base_url'], '/');
+            
+            // 1. Obtener token JWT
+            $loginResponse = Http::post(
+                $baseUrl . $apiConfig['endpoints']['login'],
+                $apiConfig['credentials']
+            );
+            
+            if (!$loginResponse->successful()) {
+                return redirect()->back()
+                    ->with('error', 'No se pudo autenticar con el servicio de ventas: ' . $loginResponse->body());
+            }
+
+            $token = $loginResponse->json('token');
+            
+            if (empty($token)) {
+                return redirect()->back()
+                    ->with('error', 'No se recibió un token válido del servicio de autenticación');
+            }
+            
+            // 2. Obtener ventas del cliente usando el token
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $token,
+                'Accept' => 'application/json',
+            ])->get($baseUrl . $apiConfig['endpoints']['ventas'], [
+                'cliente_id' => $client->id
+            ]);
+
+            $ventas = [];
+            
+            if ($response->successful()) {
+                $ventas = $response->json();
+            }
+
+            return view('clients.ventas', [
+                'client' => $client,
+                'ventas' => $ventas
+            ]);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Error al conectar con el servicio de ventas: ' . $e->getMessage());
+        }
     }
 
 
